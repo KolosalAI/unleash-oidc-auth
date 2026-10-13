@@ -1,0 +1,56 @@
+# Throwaway test stack for ../server.mjs: postgres + a fake OIDC provider + the custom Unleash image built from ..
+# Run it with ./smoke.sh (it starts and stops this stack).
+name: unleash-oidc-test
+
+services:
+  postgres:
+    image: postgres:17.2-alpine
+    environment:
+      POSTGRES_USER: unleash
+      POSTGRES_PASSWORD: unleash
+      POSTGRES_DB: unleash
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U unleash -d unleash"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  oidc-stub:
+    image: node:22-alpine
+    command: ["node", "/stub-oidc.mjs"]
+    environment:
+      PORT: "9000"
+      ISSUER: http://oidc-stub:9000
+      PUBLIC_URL: http://localhost:19000
+      CLIENT_ID: test-client
+    volumes:
+      - ./stub-oidc.mjs:/stub-oidc.mjs:ro
+    ports:
+      - "19000:9000"
+
+  unleash:
+    build:
+      context: ..
+      args:
+        UNLEASH_IMAGE_VERSION: ${UNLEASH_IMAGE_VERSION:-8.2.0}
+        SOURCE_REVISION: test
+    environment:
+      DATABASE_URL: postgres://unleash:unleash@postgres:5432/unleash
+      DATABASE_SSL: "false"
+      SECURE_HEADERS: "true"
+      UNLEASH_DEFAULT_ADMIN_USERNAME: localadmin
+      UNLEASH_DEFAULT_ADMIN_PASSWORD: localadmin123
+      INIT_ADMIN_API_TOKENS: "*:*.test-admin-token-000000000000000000000000000000"
+      INIT_CLIENT_API_TOKENS: "default:development.test-client-token-0000000000000000000000"
+      INIT_FRONTEND_API_TOKENS: "default:development.test-frontend-token-00000000000000000000"
+      OIDC_ISSUER: ${TEST_OIDC_ISSUER-http://oidc-stub:9000}
+      OIDC_CLIENT_ID: ${TEST_OIDC_CLIENT_ID-test-client}
+      OIDC_REDIRECT_URI: http://localhost:14242/auth/zitadel/callback
+      OIDC_ALLOWED_EMAIL_DOMAIN: example.com
+    ports:
+      - "14242:4242"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      oidc-stub:
+        condition: service_started
